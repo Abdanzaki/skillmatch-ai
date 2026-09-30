@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar';
-import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
+import {
+  getAllJobs,
+  createJob,
+  updateJob,
+  deleteJob
+} from '../../services/firestoreService';
 import LoadingSpinner from '../../components/LoadingSpinner';
-import { PlusCircle, Trash2, Edit2, Check, X, Briefcase } from 'lucide-react';
+import { PlusCircle, Trash2, X } from 'lucide-react';
 
 export default function AdminJobsPage() {
   const { currentUser } = useAuth();
@@ -28,8 +32,8 @@ export default function AdminJobsPage() {
   const fetchJobs = async () => {
     try {
       setLoading(true);
-      const snap = await getDocs(collection(db, 'jobs'));
-      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const loadedJobs = await getAllJobs();
+      setJobs(loadedJobs);
     } catch (err) {
       console.error('Error fetching jobs:', err);
     } finally {
@@ -43,8 +47,7 @@ export default function AdminJobsPage() {
 
   const toggleJobStatus = async (jobId, currentStatus) => {
     try {
-      const jobRef = doc(db, 'jobs', jobId);
-      await updateDoc(jobRef, { active: !currentStatus });
+      await updateJob(jobId, { active: !currentStatus });
       setJobs(jobs.map(j => j.id === jobId ? { ...j, active: !currentStatus } : j));
     } catch (err) {
       console.error('Error updating status:', err);
@@ -54,7 +57,7 @@ export default function AdminJobsPage() {
   const handleDeleteJob = async (jobId) => {
     if (!window.confirm('Are you sure you want to delete this job posting?')) return;
     try {
-      await deleteDoc(doc(db, 'jobs', jobId));
+      await deleteJob(jobId);
       setJobs(jobs.filter(j => j.id !== jobId));
     } catch (err) {
       console.error('Error deleting job:', err);
@@ -65,12 +68,10 @@ export default function AdminJobsPage() {
     e.preventDefault();
     try {
       setSubmitting(true);
-      const newJobId = `job-${Date.now()}`;
       const reqList = requiredSkills.split(',').map(s => s.trim()).filter(Boolean);
       const prefList = preferredSkills.split(',').map(s => s.trim()).filter(Boolean);
 
       const jobData = {
-        id: newJobId,
         title,
         company,
         location,
@@ -82,12 +83,10 @@ export default function AdminJobsPage() {
         preferredSkills: prefList,
         description,
         active: true,
-        postedAt: serverTimestamp(),
-        createdBy: currentUser.uid,
-        applicantCount: 0
+        createdBy: currentUser.uid
       };
 
-      await setDoc(doc(db, 'jobs', newJobId), jobData);
+      await createJob(jobData);
       setShowAddModal(false);
       // Reset form
       setTitle('');

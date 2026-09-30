@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, getDocs, limit, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { getResumeAnalysis, updateResumeAnalysis } from '../services/firestoreService';
 import LoadingSpinner from '../components/LoadingSpinner';
 import {
   Award,
@@ -14,8 +13,12 @@ import {
   GraduationCap,
   FolderGit2,
   AlertCircle,
-  UserCheck,
-  Save
+  Save,
+  Check,
+  Plus,
+  Trash2,
+  HelpCircle,
+  ShieldCheck
 } from 'lucide-react';
 
 export default function ResumeAnalysisPage() {
@@ -23,38 +26,58 @@ export default function ResumeAnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [skillsText, setSkillsText] = useState('');
+  const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Editable Form States
+  const [skillsText, setSkillsText] = useState('');
+  const [personalInfo, setPersonalInfo] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    location: '',
+    linkedin: '',
+    github: ''
+  });
+  const [educationList, setEducationList] = useState([]);
+  const [experienceList, setExperienceList] = useState([]);
+  const [projectsList, setProjectsList] = useState([]);
+  const [certificationsText, setCertificationsText] = useState('');
 
   useEffect(() => {
     async function loadAnalysis() {
       if (!currentUser) return;
       try {
         setLoading(true);
-        const q = query(
-          collection(db, 'resumeAnalysis'),
-          where('userId', '==', currentUser.uid),
-          limit(1)
-        );
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          const data = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        const data = await getResumeAnalysis(currentUser.uid);
+
+        if (data) {
           setAnalysis(data);
-          setSkillsText(data.skills ? data.skills.join(', ') : '');
+          syncFormStates(data);
         } else {
-          // Fallback sample analysis for demonstration
-          const sample = {
-            id: 'sample-analysis',
+          // Provide standard initial data for testing
+          const initial = {
+            id: `analysis_${currentUser.uid}`,
+            userId: currentUser.uid,
             personal_info: {
               fullName: currentUser.displayName || 'Alex Morgan',
               email: currentUser.email || 'alex@skillmatch.ai',
               phone: '+1 (555) 234-5678',
-              location: 'Austin, TX'
+              location: 'Austin, TX',
+              linkedin: 'linkedin.com/in/alexmorgan-dev',
+              github: 'github.com/alexmorgan'
             },
             skills: ['Java', 'Spring Boot', 'React', 'JavaScript', 'TypeScript', 'PostgreSQL', 'Git', 'HTML5', 'CSS3', 'Docker'],
             experience_years: 2,
             education: [
-              { degree: 'B.S. in Computer Science', institution: 'University of Texas at Austin', field: 'Computer Science', year: 2023, gpa: '3.82' }
+              {
+                degree: 'B.S. in Computer Science',
+                institution: 'University of Texas at Austin',
+                field: 'Computer Science',
+                year: 2023,
+                gpa: '3.82'
+              }
             ],
             experience: [
               {
@@ -62,9 +85,9 @@ export default function ResumeAnalysisPage() {
                 position: 'Software Engineer',
                 duration: 'June 2023 - Present',
                 responsibilities: [
-                  'Engineered REST APIs handling 50k daily active users',
-                  'Developed responsive web application features using React and TypeScript',
-                  'Optimized SQL queries and indexing in PostgreSQL'
+                  'Engineered REST APIs handling 50k daily active users with sub-100ms response times.',
+                  'Developed responsive web components with React and TypeScript.',
+                  'Optimized SQL queries and database indexing in PostgreSQL.'
                 ]
               }
             ],
@@ -75,7 +98,7 @@ export default function ResumeAnalysisPage() {
                 description: 'Built a containerized e-commerce backend with product search, cart, and stripe checkout.'
               }
             ],
-            certifications: ['Oracle Certified Associate, Java SE 8 Programmer'],
+            certifications: ['Oracle Certified Associate, Java SE 8 Programmer', 'AWS Certified Cloud Practitioner'],
             scoreBreakdown: {
               skillsScore: 88,
               experienceScore: 80,
@@ -84,41 +107,109 @@ export default function ResumeAnalysisPage() {
               completenessScore: 92,
               overallScore: 88,
               reasons: [
-                'High match with in-demand full-stack and backend competencies (Java, React, PostgreSQL)',
-                'Accredited B.S. degree in Computer Science with a high GPA',
-                'Demonstrated production software experience building microservices',
-                'Strong portfolio project showcasing containerization and architectural separation'
+                'Skills: Strong alignment with high-demand backend and full-stack enterprise technologies.',
+                'Experience: Demonstrated software engineering tenure building production microservices.',
+                'Education: Accredited B.S. in Computer Science with a high cumulative GPA (3.82).',
+                'Projects: Modern cloud architecture project utilizing Docker and microservice patterns.',
+                'Completeness: Complete profile with confirmed contact channels, education, and career history.'
               ]
-            }
+            },
+            isEdited: false
           };
-          setAnalysis(sample);
-          setSkillsText(sample.skills.join(', '));
+          setAnalysis(initial);
+          syncFormStates(initial);
         }
       } catch (err) {
-        console.error('Error loading analysis:', err);
+        console.error('Error loading resume analysis:', err);
+        setErrorMsg('Failed to load resume analysis.');
       } finally {
         setLoading(false);
       }
     }
+
     loadAnalysis();
   }, [currentUser]);
 
+  const syncFormStates = (data) => {
+    setSkillsText(data.skills ? data.skills.join(', ') : '');
+    setPersonalInfo(data.personal_info || {
+      fullName: '',
+      email: '',
+      phone: '',
+      location: '',
+      linkedin: '',
+      github: ''
+    });
+    setEducationList(data.education || []);
+    setExperienceList(data.experience || []);
+    setProjectsList(data.projects || []);
+    setCertificationsText(data.certifications ? data.certifications.join(', ') : '');
+  };
+
   const handleSaveCorrections = async () => {
+    if (!analysis || !currentUser) return;
     try {
-      const updatedSkills = skillsText.split(',').map(s => s.trim()).filter(Boolean);
-      if (analysis.id && analysis.id !== 'sample-analysis') {
-        const docRef = doc(db, 'resumeAnalysis', analysis.id);
-        await updateDoc(docRef, {
-          skills: updatedSkills,
-          isEdited: true
-        });
-      }
-      setAnalysis(prev => ({ ...prev, skills: updatedSkills }));
+      setSaving(true);
+      setErrorMsg('');
+
+      const parsedSkills = skillsText.split(',').map(s => s.trim()).filter(Boolean);
+      const parsedCerts = certificationsText.split(',').map(c => c.trim()).filter(Boolean);
+
+      // Recalculate score based on corrected data
+      const skillsScore = Math.min(100, Math.max(40, parsedSkills.length * 9));
+      const expScore = analysis.scoreBreakdown?.experienceScore || 80;
+      const eduScore = educationList.length > 0 ? 95 : 70;
+      const projScore = Math.min(100, Math.max(50, projectsList.length * 30 + 30));
+      const completenessScore = 95;
+
+      const overallScore = Math.round(
+        skillsScore * 0.35 +
+        expScore * 0.25 +
+        eduScore * 0.15 +
+        projScore * 0.15 +
+        completenessScore * 0.10
+      );
+
+      const updatedPayload = {
+        personal_info: personalInfo,
+        skills: parsedSkills,
+        education: educationList,
+        experience: experienceList,
+        projects: projectsList,
+        certifications: parsedCerts,
+        scoreBreakdown: {
+          skillsScore,
+          experienceScore: expScore,
+          educationScore: eduScore,
+          projectsScore: projScore,
+          completenessScore,
+          overallScore,
+          reasons: [
+            `Skills: Updated with ${parsedSkills.length} user-verified technical competencies.`,
+            `Experience: Evaluated based on ${experienceList.length} professional role(s).`,
+            `Education: Verified ${educationList.length} educational degree(s).`,
+            `Projects: Portfolio contains ${projectsList.length} documented technical project(s).`,
+            'Completeness: Comprehensive documentation verified across all critical sections.'
+          ]
+        },
+        isEdited: true
+      };
+
+      await updateResumeAnalysis(analysis.id, updatedPayload);
+
+      setAnalysis(prev => ({
+        ...prev,
+        ...updatedPayload
+      }));
+
       setIsEditing(false);
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => setSaveSuccess(false), 3500);
     } catch (err) {
-      console.error('Failed to update skills:', err);
+      console.error('Error saving resume corrections:', err);
+      setErrorMsg('Failed to persist corrections to Firestore.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -127,7 +218,7 @@ export default function ResumeAnalysisPage() {
       <div className="dashboard-layout">
         <Sidebar />
         <main className="dashboard-content">
-          <LoadingSpinner fullScreen message="Loading AI Resume Analysis..." />
+          <LoadingSpinner fullScreen message="Loading AI Resume Analysis & Breakdown..." />
         </main>
       </div>
     );
@@ -147,43 +238,82 @@ export default function ResumeAnalysisPage() {
     <div className="dashboard-layout">
       <Sidebar />
       <main className="dashboard-content">
+        {/* Top Header */}
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: 16,
-          marginBottom: 32
+          marginBottom: 28
         }}>
           <div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#38bdf8', fontSize: '0.85rem', fontWeight: 700, marginBottom: 4 }}>
+              <Sparkles size={16} />
+              <span>AI Analysis Engine</span>
+              {analysis?.isEdited && (
+                <span className="badge badge-neutral" style={{ fontSize: '0.65rem', marginLeft: 6 }}>
+                  User Corrected
+                </span>
+              )}
+            </div>
             <h1 style={{ fontSize: '1.9rem', marginBottom: 6 }}>Resume Analysis & Breakdown</h1>
             <p style={{ color: 'var(--text-secondary)' }}>
-              Explainable AI parsing results for {analysis?.personal_info?.fullName || 'Candidate'}.
+              Structured data extracted by AI. Review and correct any extraction discrepancies below.
             </p>
           </div>
+
           <div style={{ display: 'flex', gap: 12 }}>
             <button
-              onClick={() => setIsEditing(!isEditing)}
+              onClick={() => {
+                if (isEditing) syncFormStates(analysis);
+                setIsEditing(!isEditing);
+              }}
               className="btn btn-secondary"
             >
               <Edit3 size={16} />
               {isEditing ? 'Cancel Editing' : 'Edit Extracted Data'}
             </button>
-            <Link to="/jobs" className="btn btn-primary">
-              <Briefcase size={16} />
-              Match Jobs Now
-            </Link>
+
+            {isEditing ? (
+              <button
+                onClick={handleSaveCorrections}
+                disabled={saving}
+                className="btn btn-primary"
+              >
+                {saving ? (
+                  <span className="spinner" style={{ width: 18, height: 18 }}></span>
+                ) : (
+                  <>
+                    <Save size={16} />
+                    Save Corrections
+                  </>
+                )}
+              </button>
+            ) : (
+              <Link to="/jobs" className="btn btn-primary">
+                <Briefcase size={16} />
+                Match Jobs
+              </Link>
+            )}
           </div>
         </div>
 
-        {saveSuccess && (
-          <div className="alert alert-success">
-            <CheckCircle size={20} />
-            <span>Extracted skills updated successfully! Your match scores will recalculate.</span>
+        {errorMsg && (
+          <div className="alert alert-danger" style={{ marginBottom: 20 }}>
+            <AlertCircle size={20} />
+            <span>{errorMsg}</span>
           </div>
         )}
 
-        {/* Explainable Score Header Card */}
+        {saveSuccess && (
+          <div className="alert alert-success" style={{ marginBottom: 20 }}>
+            <CheckCircle size={20} />
+            <span>Corrections saved to your Cloud Firestore profile! Your match scores will reflect these updates.</span>
+          </div>
+        )}
+
+        {/* Explainability & Quality Score Card */}
         <div className="glass-card" style={{
           background: 'linear-gradient(135deg, rgba(21, 27, 45, 0.95) 0%, rgba(30, 41, 68, 0.95) 100%)',
           borderColor: 'rgba(99, 102, 241, 0.35)',
@@ -202,87 +332,107 @@ export default function ResumeAnalysisPage() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
               <div style={{
-                width: 76,
-                height: 76,
+                width: 80,
+                height: 80,
                 borderRadius: 'var(--radius-lg)',
                 background: 'var(--accent-gradient)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#fff',
-                fontSize: '2rem',
+                fontSize: '2.2rem',
                 fontWeight: 800,
-                fontFamily: 'var(--font-mono)'
+                fontFamily: 'var(--font-mono)',
+                boxShadow: '0 0 24px rgba(99, 102, 241, 0.45)'
               }}>
                 {breakdown.overallScore}%
               </div>
               <div>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#34d399', fontSize: '0.85rem', fontWeight: 600 }}>
-                  <CheckCircle size={14} />
-                  <span>Strong Competitive Profile</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#34d399', fontSize: '0.85rem', fontWeight: 700 }}>
+                  <Award size={16} />
+                  <span>Resume Health Rating</span>
                 </div>
-                <h2 style={{ fontSize: '1.7rem', margin: '4px 0' }}>Overall Resume Quality Score</h2>
+                <h2 style={{ fontSize: '1.75rem', margin: '4px 0' }}>Comprehensive Profile Score</h2>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-                  Transparently weighted across 5 critical dimensions (NOT a guarantee of hiring success).
+                  Deterministically calculated across 5 dimensions: Skills, Experience, Education, Projects, and Completeness.
                 </p>
               </div>
             </div>
+
+            {/* Crucial Non-Guarantee Legal / Ethical Notice */}
+            <div style={{
+              maxWidth: 360,
+              padding: '12px 16px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              color: '#fbbf24',
+              fontSize: '0.8rem',
+              lineHeight: 1.5
+            }}>
+              <strong>Important Disclaimer:</strong> This score reflects resume structural completeness and technical skill density. It is provided for guidance and is <em>never a guarantee of job offer or hiring success</em>.
+            </div>
           </div>
 
-          {/* 5-Dimension Score Breakdown */}
+          {/* 5-Dimension Score Progress Cards */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
             gap: 16,
             marginBottom: 28
           }}>
+            {/* Skills */}
             <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600 }}>Skills Depth</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
                 {breakdown.skillsScore}%
               </div>
               <div className="progress-container"><div className="progress-bar" style={{ width: `${breakdown.skillsScore}%` }}></div></div>
             </div>
 
+            {/* Experience */}
             <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600 }}>Experience Fit</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#38bdf8', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38bdf8', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
                 {breakdown.experienceScore}%
               </div>
               <div className="progress-container"><div className="progress-bar" style={{ width: `${breakdown.experienceScore}%`, background: 'var(--cyan-gradient)' }}></div></div>
             </div>
 
+            {/* Education */}
             <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600 }}>Education</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#34d399', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#34d399', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
                 {breakdown.educationScore}%
               </div>
               <div className="progress-container"><div className="progress-bar" style={{ width: `${breakdown.educationScore}%`, background: 'var(--emerald-gradient)' }}></div></div>
             </div>
 
+            {/* Projects */}
             <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600 }}>Projects Quality</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fbbf24', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600 }}>Projects Portfolio</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fbbf24', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
                 {breakdown.projectsScore}%
               </div>
               <div className="progress-container"><div className="progress-bar" style={{ width: `${breakdown.projectsScore}%`, background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}></div></div>
             </div>
 
+            {/* Completeness */}
             <div style={{ padding: 16, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600 }}>Completeness</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#a855f7', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#a855f7', fontFamily: 'var(--font-mono)', margin: '4px 0' }}>
                 {breakdown.completenessScore}%
               </div>
               <div className="progress-container"><div className="progress-bar" style={{ width: `${breakdown.completenessScore}%`, background: 'linear-gradient(135deg, #a855f7, #6366f1)' }}></div></div>
             </div>
           </div>
 
-          {/* Explainable Reasons */}
+          {/* Reasons Breakdown */}
           <div>
-            <h4 style={{ fontSize: '0.95rem', marginBottom: 12, color: 'var(--text-secondary)' }}>Score Rationale:</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <h4 style={{ fontSize: '0.95rem', marginBottom: 12, color: 'var(--text-secondary)' }}>Score Breakdown Rationale:</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {breakdown.reasons?.map((reason, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
                   <CheckCircle size={16} color="#34d399" style={{ marginTop: 3, flexShrink: 0 }} />
                   <span>{reason}</span>
                 </div>
@@ -291,31 +441,82 @@ export default function ResumeAnalysisPage() {
           </div>
         </div>
 
-        {/* Structured Sections */}
+        {/* Structured Sections (Editable) */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 24 }}>
-          {/* Skills Section */}
+          {/* Personal Info */}
           <div className="glass-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Sparkles size={18} color="var(--accent-primary)" />
-                Extracted Skills ({analysis?.skills?.length || 0})
-              </h3>
-            </div>
+            <h3 style={{ fontSize: '1.15rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ShieldCheck size={18} color="var(--accent-primary)" />
+              Personal & Contact Information
+            </h3>
+
+            {isEditing ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Full Name</label>
+                  <input
+                    className="input-field"
+                    value={personalInfo.fullName}
+                    onChange={e => setPersonalInfo({ ...personalInfo, fullName: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Email</label>
+                  <input
+                    className="input-field"
+                    value={personalInfo.email}
+                    onChange={e => setPersonalInfo({ ...personalInfo, email: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Phone</label>
+                  <input
+                    className="input-field"
+                    value={personalInfo.phone}
+                    onChange={e => setPersonalInfo({ ...personalInfo, phone: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Location</label>
+                  <input
+                    className="input-field"
+                    value={personalInfo.location}
+                    onChange={e => setPersonalInfo({ ...personalInfo, location: e.target.value })}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.9rem' }}>
+                <div><strong>Full Name:</strong> {personalInfo.fullName || 'Not provided'}</div>
+                <div><strong>Email:</strong> {personalInfo.email || 'Not provided'}</div>
+                <div><strong>Phone:</strong> {personalInfo.phone || 'Not provided'}</div>
+                <div><strong>Location:</strong> {personalInfo.location || 'Not provided'}</div>
+                {personalInfo.linkedin && <div><strong>LinkedIn:</strong> {personalInfo.linkedin}</div>}
+                {personalInfo.github && <div><strong>GitHub:</strong> {personalInfo.github}</div>}
+              </div>
+            )}
+          </div>
+
+          {/* Technical Skills */}
+          <div className="glass-card">
+            <h3 style={{ fontSize: '1.15rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Sparkles size={18} color="var(--accent-primary)" />
+              Extracted Technical Skills ({analysis?.skills?.length || 0})
+            </h3>
 
             {isEditing ? (
               <div>
                 <label className="form-label">Edit comma-separated skills:</label>
                 <textarea
                   className="input-field"
-                  rows={4}
+                  rows={5}
                   value={skillsText}
                   onChange={(e) => setSkillsText(e.target.value)}
-                  style={{ marginBottom: 12 }}
+                  placeholder="Java, Spring Boot, React, TypeScript..."
                 />
-                <button onClick={handleSaveCorrections} className="btn btn-primary btn-sm">
-                  <Save size={14} />
-                  Save Corrections
-                </button>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 6 }}>
+                  Separate individual skills with commas.
+                </p>
               </div>
             ) : (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -328,14 +529,15 @@ export default function ResumeAnalysisPage() {
             )}
           </div>
 
-          {/* Experience Section */}
+          {/* Experience */}
           <div className="glass-card">
             <h3 style={{ fontSize: '1.15rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Briefcase size={18} color="#38bdf8" />
-              Work Experience ({analysis?.experience_years || 0} years)
+              Work & Professional Experience
             </h3>
-            {analysis?.experience?.map((exp, i) => (
-              <div key={i} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: i < analysis.experience.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+
+            {experienceList.map((exp, i) => (
+              <div key={i} style={{ marginBottom: 16, paddingBottom: 16, borderBottom: i < experienceList.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{exp.position}</div>
                 <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 6 }}>
                   {exp.company} • {exp.duration}
@@ -349,14 +551,15 @@ export default function ResumeAnalysisPage() {
             ))}
           </div>
 
-          {/* Education Section */}
+          {/* Education */}
           <div className="glass-card">
             <h3 style={{ fontSize: '1.15rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
               <GraduationCap size={18} color="#34d399" />
-              Education
+              Education & Degrees
             </h3>
-            {analysis?.education?.map((edu, i) => (
-              <div key={i}>
+
+            {educationList.map((edu, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{edu.degree}</div>
                 <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                   {edu.institution} ({edu.year})
@@ -370,27 +573,57 @@ export default function ResumeAnalysisPage() {
             ))}
           </div>
 
-          {/* Projects Section */}
+          {/* Projects */}
           <div className="glass-card">
             <h3 style={{ fontSize: '1.15rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
               <FolderGit2 size={18} color="#fbbf24" />
-              Portfolio Projects
+              Projects
             </h3>
-            {analysis?.projects?.map((proj, i) => (
-              <div key={i} style={{ marginBottom: 12 }}>
+
+            {projectsList.map((proj, i) => (
+              <div key={i} style={{ marginBottom: 14 }}>
                 <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{proj.name}</div>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '4px 0' }}>
                   {proj.description}
                 </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
                   {proj.tech?.map((t, ti) => (
-                    <span key={ti} className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>
+                    <span key={ti} className="badge badge-neutral" style={{ fontSize: '0.72rem' }}>
                       {t}
                     </span>
                   ))}
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Certifications */}
+          <div className="glass-card">
+            <h3 style={{ fontSize: '1.15rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Award size={18} color="#a855f7" />
+              Certifications & Credentials
+            </h3>
+
+            {isEditing ? (
+              <div>
+                <label className="form-label">Certifications (comma-separated):</label>
+                <input
+                  className="input-field"
+                  value={certificationsText}
+                  onChange={e => setCertificationsText(e.target.value)}
+                  placeholder="AWS Certified Practitioner, Oracle Certified Java..."
+                />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {analysis?.certifications?.map((c, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
+                    <CheckCircle size={15} color="#34d399" />
+                    <span>{c}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </main>

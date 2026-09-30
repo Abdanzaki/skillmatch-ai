@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase/config';
-import LoadingSpinner from '../components/LoadingSpinner';
+import { updateUserProfile } from '../services/firestoreService';
 import { User, Mail, Phone, MapPin, Briefcase, CheckCircle, Save } from 'lucide-react';
 
 export default function ProfilePage() {
@@ -34,17 +32,16 @@ export default function ProfilePage() {
     if (!currentUser) return;
     try {
       setSaving(true);
-      const userRef = doc(db, 'users', currentUser.uid);
       const updatedData = {
         displayName,
         phone,
         location,
         bio,
         preferredWorkMode,
-        preferredRoles: preferredRoles.split(',').map(r => r.trim()).filter(Boolean),
-        updatedAt: serverTimestamp()
+        preferredRoles: preferredRoles.split(',').map(r => r.trim()).filter(Boolean)
       };
-      await updateDoc(userRef, updatedData);
+
+      await updateUserProfile(currentUser.uid, updatedData);
       await refreshUserProfile();
       setSuccessMsg('Profile updated successfully!');
       setTimeout(() => setSuccessMsg(''), 3000);

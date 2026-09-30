@@ -2,20 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { doc, getDoc, collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import {
+  getJobById,
+  hasAppliedToJob,
+  createApplication,
+  getUserSkills
+} from '../services/firestoreService';
 import LoadingSpinner from '../components/LoadingSpinner';
 import {
   Briefcase,
   MapPin,
   DollarSign,
-  Calendar,
   CheckCircle,
   XCircle,
   Sparkles,
   ArrowLeft,
   Send,
-  Bookmark,
   AlertCircle
 } from 'lucide-react';
 
@@ -36,30 +38,21 @@ export default function JobDetailsPage() {
     async function loadJobDetails() {
       try {
         setLoading(true);
-        const jobRef = doc(db, 'jobs', id);
-        const jobSnap = await getDoc(jobRef);
+        const jobData = await getJobById(id);
 
-        if (jobSnap.exists()) {
-          setJob({ id: jobSnap.id, ...jobSnap.data() });
+        if (jobData) {
+          setJob(jobData);
         } else {
           setErrorMsg('Job posting not found.');
         }
 
         if (currentUser) {
-          // Check if user already applied
-          const appSnap = await getDocs(
-            query(collection(db, 'applications'), where('userId', '==', currentUser.uid), where('jobId', '==', id))
-          );
-          if (!appSnap.empty) {
-            setAlreadyApplied(true);
-          }
+          const applied = await hasAppliedToJob(currentUser.uid, id);
+          setAlreadyApplied(applied);
 
-          // Fetch skills
-          const skillsSnap = await getDocs(
-            query(collection(db, 'userSkills'), where('userId', '==', currentUser.uid))
-          );
-          if (!skillsSnap.empty) {
-            setUserSkills(skillsSnap.docs.map(d => d.data().name));
+          const skillsList = await getUserSkills(currentUser.uid);
+          if (skillsList.length > 0) {
+            setUserSkills(skillsList.map(d => d.name));
           }
         }
       } catch (err) {
@@ -90,12 +83,10 @@ export default function JobDetailsPage() {
         jobTitle: job.title,
         company: job.company,
         status: 'Applied',
-        matchScore: matchInfo.score,
-        appliedAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        matchScore: matchInfo.score
       };
 
-      await addDoc(collection(db, 'applications'), applicationData);
+      await createApplication(applicationData);
       setAlreadyApplied(true);
       setApplySuccess(true);
     } catch (err) {

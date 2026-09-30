@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { getUserApplications } from '../services/firestoreService';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { Send, Clock, CheckCircle2, AlertCircle, Calendar, ArrowRight } from 'lucide-react';
 
@@ -17,12 +16,7 @@ export default function MyApplicationsPage() {
       if (!currentUser) return;
       try {
         setLoading(true);
-        const q = query(
-          collection(db, 'applications'),
-          where('userId', '==', currentUser.uid)
-        );
-        const snap = await getDocs(q);
-        const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const list = await getUserApplications(currentUser.uid);
         setApplications(list);
       } catch (err) {
         console.error('Error fetching applications:', err);

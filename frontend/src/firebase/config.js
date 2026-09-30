@@ -12,6 +12,10 @@ import {
   getStorage,
   connectStorageEmulator
 } from 'firebase/storage';
+import {
+  getFunctions,
+  connectFunctionsEmulator
+} from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'mock-api-key',
@@ -30,6 +34,7 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+export const functions = getFunctions(app, 'us-central1');
 
 // Authentication Providers
 export const googleProvider = new GoogleAuthProvider();
@@ -51,8 +56,10 @@ if (useEmulator && typeof window !== 'undefined' && !window.__FIREBASE_EMULATORS
     const storagePort = Number(import.meta.env.VITE_FIREBASE_STORAGE_EMULATOR_PORT || 9199);
     connectStorageEmulator(storage, storageHost, storagePort);
 
+    connectFunctionsEmulator(functions, 'localhost', 5001);
+
     window.__FIREBASE_EMULATORS_CONNECTED__ = true;
-    console.log('[SkillMatch AI] Connected to Firebase Emulators (Auth, Firestore, Storage)');
+    console.log('[SkillMatch AI] Connected to Firebase Emulators (Auth, Firestore, Storage, Functions)');
   } catch (error) {
     console.warn('[SkillMatch AI] Firebase emulator connection error:', error.message);
   }

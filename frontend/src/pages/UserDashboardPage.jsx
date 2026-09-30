@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import {
+  getUserApplications,
+  getResumeAnalysis,
+  getUserSkills
+} from '../services/firestoreService';
 import Sidebar from '../components/Sidebar';
 import LoadingSpinner from '../components/LoadingSpinner';
 import {
@@ -11,10 +14,7 @@ import {
   Briefcase,
   Send,
   ArrowRight,
-  TrendingUp,
   Clock,
-  CheckCircle,
-  AlertTriangle,
   UploadCloud
 } from 'lucide-react';
 
@@ -43,26 +43,14 @@ export default function UserDashboardPage() {
       try {
         setLoading(true);
 
-        // 1. Fetch user applications
-        const appsQuery = query(
-          collection(db, 'applications'),
-          where('userId', '==', currentUser.uid),
-          limit(5)
-        );
-        const appsSnap = await getDocs(appsQuery);
-        const apps = appsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setRecentApplications(apps);
+        // 1. Fetch user applications via firestoreService
+        const apps = await getUserApplications(currentUser.uid);
+        setRecentApplications(apps.slice(0, 5));
 
-        // 2. Fetch user resumeAnalysis if exists
-        const analysisQuery = query(
-          collection(db, 'resumeAnalysis'),
-          where('userId', '==', currentUser.uid),
-          limit(1)
-        );
-        const analysisSnap = await getDocs(analysisQuery);
+        // 2. Fetch user resumeAnalysis via firestoreService
+        const analysis = await getResumeAnalysis(currentUser.uid);
 
-        if (!analysisSnap.empty) {
-          const analysis = analysisSnap.docs[0].data();
+        if (analysis) {
           setHasResume(true);
           const overallScore = analysis.scoreBreakdown?.overallScore || 85;
           const skillsCount = analysis.skills?.length || 8;
@@ -74,7 +62,6 @@ export default function UserDashboardPage() {
             applicationsCount: apps.length
           }));
         } else {
-          // If no resume uploaded yet
           setHasResume(false);
           setStats(prev => ({
             ...prev,
@@ -84,15 +71,10 @@ export default function UserDashboardPage() {
           }));
         }
 
-        // 3. Fetch userSkills
-        const skillsQuery = query(
-          collection(db, 'userSkills'),
-          where('userId', '==', currentUser.uid)
-        );
-        const skillsSnap = await getDocs(skillsQuery);
-        if (!skillsSnap.empty) {
-          const mapped = skillsSnap.docs.map(d => {
-            const data = d.data();
+        // 3. Fetch userSkills via firestoreService
+        const skillsList = await getUserSkills(currentUser.uid);
+        if (skillsList.length > 0) {
+          const mapped = skillsList.map(data => {
             let score = 75;
             if (data.level === 'Expert') score = 95;
             else if (data.level === 'Advanced') score = 85;
@@ -156,7 +138,7 @@ export default function UserDashboardPage() {
           </div>
         </div>
 
-        {/* If user hasn't uploaded a resume, display an onboarding banner */}
+        {/* Onboarding Banner if no resume yet */}
         {!hasResume && (
           <div className="glass-card" style={{
             background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(14, 165, 233, 0.1) 100%)',
@@ -197,7 +179,6 @@ export default function UserDashboardPage() {
 
         {/* 4 Stat Cards */}
         <div className="stats-grid">
-          {/* Resume Score */}
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
               <Award size={26} />
@@ -208,7 +189,6 @@ export default function UserDashboardPage() {
             </div>
           </div>
 
-          {/* Skills Found */}
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#38bdf8' }}>
               <Sparkles size={26} />
@@ -219,7 +199,6 @@ export default function UserDashboardPage() {
             </div>
           </div>
 
-          {/* Jobs Matched */}
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}>
               <Briefcase size={26} />
@@ -230,7 +209,6 @@ export default function UserDashboardPage() {
             </div>
           </div>
 
-          {/* Applications */}
           <div className="stat-card">
             <div className="stat-icon" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
               <Send size={26} />
@@ -242,14 +220,14 @@ export default function UserDashboardPage() {
           </div>
         </div>
 
-        {/* Two-Column Grid: Top Skills & Recent Activity */}
+        {/* Top Skills & Recent Activity */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))',
           gap: 24,
           marginBottom: 32
         }}>
-          {/* Top Skills with Visual Bars */}
+          {/* Top Skills */}
           <div className="glass-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div>

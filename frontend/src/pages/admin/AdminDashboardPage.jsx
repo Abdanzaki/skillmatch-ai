@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import { useAuth } from '../../context/AuthContext';
-import { collection, getDocs, query, limit } from 'firebase/firestore';
-import { db } from '../../firebase/config';
+import { getAdminDashboardMetrics } from '../../services/firestoreService';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import {
   Users,
@@ -11,49 +10,27 @@ import {
   Send,
   CheckCircle,
   ShieldCheck,
-  PlusCircle,
-  ArrowRight,
-  TrendingUp
+  PlusCircle
 } from 'lucide-react';
 
 export default function AdminDashboardPage() {
   const { userProfile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    totalUsers: 2,
-    totalJobs: 18,
-    activeJobs: 18,
-    totalApplications: 3
+    totalUsers: 0,
+    totalJobs: 0,
+    activeJobs: 0,
+    totalApplications: 0,
+    recentUsers: [],
+    recentApplications: []
   });
-  const [recentUsers, setRecentUsers] = useState([]);
-  const [recentApplications, setRecentApplications] = useState([]);
 
   useEffect(() => {
     async function loadAdminMetrics() {
       try {
         setLoading(true);
-
-        // Fetch users
-        const usersSnap = await getDocs(collection(db, 'users'));
-        const usersList = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setRecentUsers(usersList.slice(0, 5));
-
-        // Fetch jobs
-        const jobsSnap = await getDocs(collection(db, 'jobs'));
-        const jobsList = jobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const activeCount = jobsList.filter(j => j.active !== false).length;
-
-        // Fetch applications
-        const appsSnap = await getDocs(collection(db, 'applications'));
-        const appsList = appsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setRecentApplications(appsList.slice(0, 5));
-
-        setStats({
-          totalUsers: usersList.length,
-          totalJobs: jobsList.length,
-          activeJobs: activeCount,
-          totalApplications: appsList.length
-        });
+        const metrics = await getAdminDashboardMetrics();
+        setStats(metrics);
       } catch (err) {
         console.error('Error fetching admin data:', err);
       } finally {
@@ -147,7 +124,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Two-Column Grid: Users List & Applications List */}
+        {/* User List & Applications List */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 24 }}>
           {/* User List */}
           <div className="glass-card">
@@ -165,7 +142,7 @@ export default function AdminDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentUsers.map(u => (
+                  {stats.recentUsers?.map(u => (
                     <tr key={u.id}>
                       <td style={{ fontWeight: 600 }}>{u.displayName || 'Unnamed'}</td>
                       <td style={{ color: 'var(--text-secondary)' }}>{u.email}</td>
@@ -197,7 +174,7 @@ export default function AdminDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentApplications.map(app => (
+                  {stats.recentApplications?.map(app => (
                     <tr key={app.id}>
                       <td style={{ fontWeight: 600 }}>{app.userName || app.userEmail}</td>
                       <td style={{ color: 'var(--text-secondary)' }}>{app.jobTitle}</td>

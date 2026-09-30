@@ -1,0 +1,5 @@
+# Firebase Functions Python 2nd gen runtime dependencies
+firebase-functions==0.4.2
+firebase-admin==6.6.0
+google-cloud-storage==2.18.2
+pypdf==5.1.0

@@ -16,11 +16,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
+          'firebase-core': ['firebase/app', 'firebase/auth', 'firebase/functions', 'firebase/storage'],
+          'firebase-firestore': ['firebase/firestore'],
           icons: ['lucide-react']
         }
       }

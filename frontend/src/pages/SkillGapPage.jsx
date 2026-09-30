@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { getUserSkills } from '../services/firestoreService';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { Compass, BookOpen, AlertCircle, Sparkles, CheckCircle2, ExternalLink } from 'lucide-react';
 
@@ -56,10 +55,9 @@ export default function SkillGapPage() {
       if (!currentUser) return;
       try {
         setLoading(true);
-        const q = query(collection(db, 'userSkills'), where('userId', '==', currentUser.uid));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          setUserSkills(snap.docs.map(d => d.data().name));
+        const skillsList = await getUserSkills(currentUser.uid);
+        if (skillsList.length > 0) {
+          setUserSkills(skillsList.map(d => d.name));
         }
       } catch (err) {
         console.error('Error fetching user skills:', err);

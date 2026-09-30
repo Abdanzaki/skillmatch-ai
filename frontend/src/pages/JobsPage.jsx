@@ -2,8 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { collection, query, where, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import {
+  getActiveJobs,
+  getUserSkills,
+  getUserSavedJobs,
+  saveJob,
+  unsaveJob
+} from '../services/firestoreService';
 import LoadingSpinner from '../components/LoadingSpinner';
 import {
   Search,
@@ -35,27 +40,19 @@ export default function JobsPage() {
       try {
         setLoading(true);
 
-        // 1. Fetch user skills
+        // 1. Fetch user skills & saved jobs via firestoreService
         if (currentUser) {
-          const userSkillsSnap = await getDocs(
-            query(collection(db, 'userSkills'), where('userId', '==', currentUser.uid))
-          );
-          if (!userSkillsSnap.empty) {
-            setUserSkills(userSkillsSnap.docs.map(d => d.data().name));
+          const skillsList = await getUserSkills(currentUser.uid);
+          if (skillsList.length > 0) {
+            setUserSkills(skillsList.map(s => s.name));
           }
 
-          // Fetch saved jobs
-          const savedSnap = await getDocs(
-            query(collection(db, 'savedJobs'), where('userId', '==', currentUser.uid))
-          );
-          const savedSet = new Set(savedSnap.docs.map(d => d.data().jobId));
-          setSavedJobIds(savedSet);
+          const savedList = await getUserSavedJobs(currentUser.uid);
+          setSavedJobIds(new Set(savedList.map(s => s.jobId)));
         }
 
-        // 2. Fetch jobs from Firestore
-        const jobsSnap = await getDocs(query(collection(db, 'jobs'), where('active', '==', true)));
-        const loadedJobs = jobsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
+        // 2. Fetch active jobs via firestoreService
+        const loadedJobs = await getActiveJobs();
         setJobs(loadedJobs);
       } catch (err) {
         console.error('Error fetching jobs:', err);
@@ -67,7 +64,7 @@ export default function JobsPage() {
   }, [currentUser]);
 
   // Compute deterministic match score:
-  // 60% required skills overlap + 20% preferred skills overlap + 20% base/experience
+  // 60% required skills overlap + 20% preferred skills overlap + 20% baseline/experience
   const calculateMatch = (job) => {
     const userSkillsLower = new Set(userSkills.map(s => s.toLowerCase()));
 
@@ -76,12 +73,11 @@ export default function JobsPage() {
 
     const matchedReq = reqSkills.filter(s => userSkillsLower.has(s.toLowerCase()));
     const missingReq = reqSkills.filter(s => !userSkillsLower.has(s.toLowerCase()));
-
     const matchedPref = prefSkills.filter(s => userSkillsLower.has(s.toLowerCase()));
 
     const reqScore = reqSkills.length > 0 ? (matchedReq.length / reqSkills.length) * 60 : 60;
     const prefScore = prefSkills.length > 0 ? (matchedPref.length / prefSkills.length) * 20 : 15;
-    const expScore = 15; // Baseline experience / education fit
+    const expScore = 15;
 
     const total = Math.min(100, Math.round(reqScore + prefScore + expScore));
 
@@ -98,18 +94,12 @@ export default function JobsPage() {
     const newSaved = new Set(savedJobIds);
 
     try {
-      const saveDocId = `${currentUser.uid}_${jobId}`;
       if (isSaved) {
         newSaved.delete(jobId);
-        await deleteDoc(doc(db, 'savedJobs', saveDocId));
+        await unsaveJob(currentUser.uid, jobId);
       } else {
         newSaved.add(jobId);
-        await setDoc(doc(db, 'savedJobs', saveDocId), {
-          id: saveDocId,
-          userId: currentUser.uid,
-          jobId: jobId,
-          savedAt: new Date()
-        });
+        await saveJob(currentUser.uid, jobId);
       }
       setSavedJobIds(newSaved);
     } catch (err) {
