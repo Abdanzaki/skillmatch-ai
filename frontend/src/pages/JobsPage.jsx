@@ -11,6 +11,7 @@ import {
   getSkillsTaxonomy
 } from '../services/firestoreService';
 import LoadingSpinner from '../components/LoadingSpinner';
+import MatchingExplainer from '../components/MatchingExplainer';
 import {
   Search,
   Filter,
@@ -199,13 +200,22 @@ export default function JobsPage() {
     <div className="dashboard-layout">
       {currentUser && <Sidebar />}
       <main className="dashboard-content">
-        {/* Page Title */}
-        <div style={{ marginBottom: 28 }}>
-          <h1 style={{ fontSize: '1.9rem', marginBottom: 6 }}>Explore Tech Roles & AI Recommendations</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>
-            Search and filter open tech opportunities with deterministic compatibility matching.
-          </p>
+        {/* Page Title & Navigation */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+          <div>
+            <h1 style={{ fontSize: '1.9rem', marginBottom: 6 }}>Explore Tech Roles & Opportunities</h1>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              Search and filter open tech opportunities with deterministic compatibility matching.
+            </p>
+          </div>
+          <Link to="/jobs/recommended" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <Sparkles size={16} />
+            <span>Recommended Jobs (AI Matches)</span>
+          </Link>
         </div>
+
+        {/* Explainability Accordion */}
+        <MatchingExplainer defaultOpen={false} />
 
         {/* Error State Banner */}
         {errorMsg && (

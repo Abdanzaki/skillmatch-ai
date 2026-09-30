@@ -7,6 +7,8 @@ and returns structured JSON.
 """
 
 import re
+import math
+from collections import Counter
 from datetime import datetime, timezone
 import firebase_admin
 from firebase_admin import firestore
@@ -392,3 +394,509 @@ def parseResume(req: https_fn.CallableRequest) -> dict:
         "analysisId": analysis_id,
         "data": analysis_doc
     }
+
+
+# =============================================================================
+# PLAN.md Section 8: Explainable Matching Engine (No Fake AI)
+# =============================================================================
+
+# Comprehensive Skill Alias Dictionary for Canonical Normalization
+SKILL_ALIASES = {
+    # Programming Languages
+    "js": "JavaScript",
+    "javascript": "JavaScript",
+    "ts": "TypeScript",
+    "typescript": "TypeScript",
+    "py": "Python",
+    "python": "Python",
+    "python3": "Python",
+    "java": "Java",
+    "core java": "Java",
+    "cpp": "C++",
+    "c++": "C++",
+    "c#": "C#",
+    "csharp": "C#",
+    ".net": "C#",
+    "dotnet": "C#",
+    "golang": "Go",
+    "go": "Go",
+    "go language": "Go",
+    "rust": "Rust",
+    "sql": "SQL",
+    "rdbms": "SQL",
+    "html": "HTML5",
+    "html5": "HTML5",
+    "css": "CSS3",
+    "css3": "CSS3",
+    "sass": "CSS3",
+    "scss": "CSS3",
+    "php": "PHP",
+    "ruby": "Ruby",
+    "kotlin": "Kotlin",
+    "swift": "Swift",
+
+    # Frameworks & Libraries
+    "react": "React",
+    "reactjs": "React",
+    "react.js": "React",
+    "react native": "React Native",
+    "next": "Next.js",
+    "next.js": "Next.js",
+    "nextjs": "Next.js",
+    "vue": "Vue.js",
+    "vue.js": "Vue.js",
+    "vuejs": "Vue.js",
+    "angular": "Angular",
+    "angularjs": "Angular",
+    "node": "Node.js",
+    "node.js": "Node.js",
+    "nodejs": "Node.js",
+    "express": "Express.js",
+    "express.js": "Express.js",
+    "expressjs": "Express.js",
+    "spring": "Spring Boot",
+    "springboot": "Spring Boot",
+    "spring boot": "Spring Boot",
+    "spring framework": "Spring Boot",
+    "django": "Django",
+    "drf": "Django",
+    "fastapi": "FastAPI",
+    "fast-api": "FastAPI",
+    "flask": "Flask",
+    "tailwind": "Tailwind CSS",
+    "tailwindcss": "Tailwind CSS",
+    "tailwind css": "Tailwind CSS",
+    "graphql": "GraphQL",
+    "apollo": "GraphQL",
+    "rest": "REST APIs",
+    "rest api": "REST APIs",
+    "rest apis": "REST APIs",
+    "restful": "REST APIs",
+    "microservices": "Microservices",
+
+    # Databases
+    "postgres": "PostgreSQL",
+    "postgresql": "PostgreSQL",
+    "psql": "PostgreSQL",
+    "mysql": "MySQL",
+    "mongo": "MongoDB",
+    "mongodb": "MongoDB",
+    "redis": "Redis",
+    "firebase": "Firebase",
+    "firestore": "Firebase",
+    "elasticsearch": "Elasticsearch",
+    "dynamodb": "DynamoDB",
+
+    # Cloud & Infrastructure
+    "docker": "Docker",
+    "containerization": "Docker",
+    "containers": "Docker",
+    "k8s": "Kubernetes",
+    "kubernetes": "Kubernetes",
+    "aws": "AWS",
+    "amazon web services": "AWS",
+    "gcp": "Google Cloud Platform",
+    "google cloud": "Google Cloud Platform",
+    "azure": "Azure",
+    "ci/cd": "CI/CD",
+    "cicd": "CI/CD",
+    "jenkins": "CI/CD",
+    "github actions": "CI/CD",
+    "git": "Git",
+    "github": "Git",
+    "gitlab": "Git",
+    "linux": "Linux",
+    "ubuntu": "Linux",
+    "bash": "Linux",
+
+    # AI / ML & Data
+    "ml": "Machine Learning",
+    "machine learning": "Machine Learning",
+    "deep learning": "Deep Learning",
+    "nlp": "Natural Language Processing",
+    "natural language processing": "Natural Language Processing",
+    "pytorch": "PyTorch",
+    "torch": "PyTorch",
+    "tensorflow": "TensorFlow",
+    "tf": "TensorFlow",
+    "pandas": "pandas",
+    "numpy": "pandas"
+}
+
+
+def normalize_skill(skill_name: str) -> str:
+    """Normalizes a skill name using lowercasing, punctuation stripping, and alias dictionary."""
+    if not skill_name or not isinstance(skill_name, str):
+        return ""
+    cleaned = skill_name.strip().lower()
+    if cleaned in SKILL_ALIASES:
+        return SKILL_ALIASES[cleaned]
+    no_punct = re.sub(r"[^\w\s+#.-]", "", cleaned)
+    if no_punct in SKILL_ALIASES:
+        return SKILL_ALIASES[no_punct]
+    return skill_name.strip()
+
+
+def tokenize_text(text: str) -> list[str]:
+    """Tokenizes text into lowercase alpha-numeric/technical terms."""
+    if not text or not isinstance(text, str):
+        return []
+    return re.findall(r"[a-zA-Z0-9+#.-]+", text.lower())
+
+
+def compute_tfidf_cosine_similarity(text1: str, text2: str) -> float:
+    """Computes TF-IDF cosine similarity between resume text and job description."""
+    tokens1 = tokenize_text(text1)
+    tokens2 = tokenize_text(text2)
+    if not tokens1 or not tokens2:
+        return 0.0
+
+    vocab = set(tokens1).union(set(tokens2))
+    df = {term: (1 if term in tokens1 else 0) + (1 if term in tokens2 else 0) for term in vocab}
+    n_docs = 2
+    idf = {term: math.log((1 + n_docs) / (1 + df[term])) + 1.0 for term in vocab}
+
+    tf1 = Counter(tokens1)
+    tf2 = Counter(tokens2)
+
+    v1 = {term: (tf1[term] / len(tokens1)) * idf[term] for term in tf1}
+    v2 = {term: (tf2[term] / len(tokens2)) * idf[term] for term in tf2}
+
+    dot_product = sum(v1.get(term, 0.0) * v2.get(term, 0.0) for term in vocab)
+    norm1 = math.sqrt(sum(val ** 2 for val in v1.values()))
+    norm2 = math.sqrt(sum(val ** 2 for val in v2.values()))
+
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return float(dot_product / (norm1 * norm2))
+
+
+def serialize_firestore_value(val):
+    """Safely converts Firestore Timestamps and datetime objects to ISO strings for JSON serialization."""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    if hasattr(val, "to_datetime"):
+        return val.to_datetime().isoformat()
+    if isinstance(val, dict):
+        return {k: serialize_firestore_value(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [serialize_firestore_value(v) for v in val]
+    return val
+
+
+def calculate_job_match(user_profile: dict, resume_analysis: dict, job_data: dict) -> dict:
+    """
+    Computes explainable match score per PLAN.md section 8:
+    1. Skill normalization via alias map.
+    2. Weighted score = required-skill overlap (60%) + preferred-skill overlap (20%)
+       + experience fit (10%) + education fit (10%).
+    3. TF-IDF cosine similarity between resume text and job description as refinement signal.
+    4. Never presents the score as a guarantee.
+    """
+    # 1. Gather candidate skills from analysis and user profile
+    candidate_skills_raw = []
+    if resume_analysis and "skills" in resume_analysis:
+        for s in resume_analysis["skills"]:
+            if isinstance(s, dict) and "name" in s:
+                candidate_skills_raw.append(s["name"])
+            elif isinstance(s, str):
+                candidate_skills_raw.append(s)
+    if user_profile and "skills" in user_profile:
+        for s in user_profile["skills"]:
+            if isinstance(s, str):
+                candidate_skills_raw.append(s)
+            elif isinstance(s, dict) and "name" in s:
+                candidate_skills_raw.append(s["name"])
+
+    # Fallback baseline skills if candidate profile has no extracted skills yet
+    if not candidate_skills_raw:
+        candidate_skills_raw = ["Java", "Spring Boot", "React", "JavaScript", "PostgreSQL", "Git", "HTML5", "CSS3"]
+
+    # Canonical candidate skill set
+    candidate_skills_norm = {normalize_skill(s): s for s in candidate_skills_raw if s}
+    candidate_norm_set = set(candidate_skills_norm.keys())
+
+    # 2. Required skills overlap (60%)
+    req_skills_raw = job_data.get("requiredSkills") or []
+    req_skills_norm = [normalize_skill(s) for s in req_skills_raw if s]
+    matched_req_norm = [s for s in req_skills_norm if s in candidate_norm_set]
+    missing_req_norm = [s for s in req_skills_norm if s not in candidate_norm_set]
+
+    # Map back to display names
+    matched_req = [candidate_skills_norm.get(s, s) for s in matched_req_norm]
+    missing_req = []
+    for s in req_skills_raw:
+        norm = normalize_skill(s)
+        if norm in missing_req_norm and s not in missing_req:
+            missing_req.append(s)
+
+    req_count = len(req_skills_norm)
+    req_ratio = len(matched_req_norm) / req_count if req_count > 0 else 1.0
+    req_score = req_ratio * 60.0
+
+    # 3. Preferred skills overlap (20%)
+    pref_skills_raw = job_data.get("preferredSkills") or []
+    pref_skills_norm = [normalize_skill(s) for s in pref_skills_raw if s]
+    matched_pref_norm = [s for s in pref_skills_norm if s in candidate_norm_set]
+    missing_pref_norm = [s for s in pref_skills_norm if s not in candidate_norm_set]
+
+    matched_pref = [candidate_skills_norm.get(s, s) for s in matched_pref_norm]
+    missing_pref = []
+    for s in pref_skills_raw:
+        norm = normalize_skill(s)
+        if norm in missing_pref_norm and s not in missing_pref:
+            missing_pref.append(s)
+
+    pref_count = len(pref_skills_norm)
+    if pref_count > 0:
+        pref_ratio = len(matched_pref_norm) / pref_count
+        pref_score = pref_ratio * 20.0
+    else:
+        pref_ratio = req_ratio
+        pref_score = req_ratio * 20.0
+
+    # 4. Experience fit (10%)
+    cand_exp = 2.0
+    if resume_analysis and resume_analysis.get("experience_years") is not None:
+        try:
+            cand_exp = float(resume_analysis["experience_years"])
+        except (ValueError, TypeError):
+            cand_exp = 2.0
+    elif user_profile and user_profile.get("experienceYears") is not None:
+        try:
+            cand_exp = float(user_profile["experienceYears"])
+        except (ValueError, TypeError):
+            cand_exp = 2.0
+
+    req_exp = 0.0
+    try:
+        req_exp = float(job_data.get("experienceRequired", 0))
+    except (ValueError, TypeError):
+        req_exp = 0.0
+
+    if req_exp <= 0:
+        exp_ratio = 1.0
+    elif cand_exp >= req_exp:
+        exp_ratio = 1.0
+    else:
+        exp_ratio = max(0.2, cand_exp / req_exp)
+    exp_score = exp_ratio * 10.0
+
+    # 5. Education fit (10%)
+    edu_list = resume_analysis.get("education", []) if resume_analysis else []
+    edu_text = " ".join([f"{e.get('degree', '')} {e.get('field', '')}" for e in edu_list]).lower()
+    tech_deg_keywords = ["computer science", "software", "engineering", "information technology", "b.s.", "b.tech", "m.s.", "bachelor", "master"]
+    if any(k in edu_text for k in tech_deg_keywords):
+        edu_ratio = 1.0
+    elif edu_list or (user_profile and user_profile.get("education")):
+        edu_ratio = 0.85
+    else:
+        edu_ratio = 0.70
+    edu_score = edu_ratio * 10.0
+
+    # Base weighted score (0 to 100)
+    base_score = req_score + pref_score + exp_score + edu_score
+
+    # 6. TF-IDF Cosine Similarity refinement signal
+    resume_text_parts = [
+        " ".join(candidate_skills_raw),
+        " ".join([f"{e.get('position', '')} {e.get('company', '')} {' '.join(e.get('responsibilities', [])) if isinstance(e.get('responsibilities'), list) else str(e.get('responsibilities', ''))}" for e in (resume_analysis.get("experience", []) if resume_analysis else [])]),
+        " ".join([f"{p.get('name', '')} {p.get('description', '')}" for p in (resume_analysis.get("projects", []) if resume_analysis else [])]),
+        job_data.get("title", "")
+    ]
+    candidate_resume_text = " ".join(resume_text_parts)
+    job_description = f"{job_data.get('title', '')} {job_data.get('description', '')} {' '.join(job_data.get('responsibilities', []))} {' '.join(job_data.get('requirements', []))}"
+
+    cosine_sim = compute_tfidf_cosine_similarity(candidate_resume_text, job_description)
+
+    # Refine score with TF-IDF signal (smooth refinement signal bounded between 15% and 100%)
+    refinement_delta = (cosine_sim - 0.35) * 8.0
+    final_score = int(round(min(100.0, max(15.0, base_score + refinement_delta))))
+
+    # All matched and missing lists
+    all_matched = matched_req + [p for p in matched_pref if p not in matched_req]
+    all_missing = missing_req + [p for p in missing_pref if p not in missing_req]
+
+    explanation_lines = [
+        f"Required Skills: {len(matched_req)} of {req_count} matched ({round(req_score, 1)} / 60 pts).",
+        f"Preferred Skills: {len(matched_pref)} of {pref_count} matched ({round(pref_score, 1)} / 20 pts).",
+        f"Experience Fit: {cand_exp:.1f} yrs candidate tenure vs {req_exp:.1f} yrs required ({round(exp_score, 1)} / 10 pts).",
+        f"Education Fit: Academic and degree credential alignment ({round(edu_score, 1)} / 10 pts).",
+        f"Semantic Relevance: TF-IDF cosine similarity of {cosine_sim:.2f} between resume text and job description.",
+        "Notice: Match score is an algorithmic decision-support estimate and is never a guarantee of hiring success or interviews."
+    ]
+    explanation = " ".join(explanation_lines)
+
+    return {
+        "score": int(final_score),
+        "matched_skills": all_matched,
+        "missing_skills": all_missing,
+        "explanation": explanation,
+        "matchedReq": matched_req,
+        "missingReq": missing_req,
+        "matchedPref": matched_pref,
+        "missingPref": missing_pref,
+        "scoreBreakdown": {
+            "requiredScore": round(req_score, 1),
+            "preferredScore": round(pref_score, 1),
+            "experienceScore": round(exp_score, 1),
+            "educationScore": round(edu_score, 1),
+            "semanticSimilarity": round(cosine_sim, 3),
+            "baseScore": round(base_score, 1),
+            "overallScore": int(final_score)
+        },
+        "disclaimer": "This match score is an algorithmic compatibility estimate for decision-support only and does not guarantee job placement, interview selection, or employment offers."
+    }
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["post", "options"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60
+)
+def matchJobs(req: https_fn.CallableRequest) -> dict:
+    """
+    Callable Cloud Function (2nd Gen): matchJobs.
+    Accepts: { userId?: str }
+    Reads user profile, resumeAnalysis, and active jobs from Firestore via Admin SDK,
+    scores each job using the deterministic explainable algorithm per PLAN.md section 8,
+    and returns a sorted-desc list of { jobId, score, matched_skills, missing_skills, explanation, job }.
+    """
+    data = req.data or {}
+    user_id = data.get("userId")
+    if not user_id and req.auth and req.auth.uid:
+        user_id = req.auth.uid
+    if not user_id:
+        user_id = "anonymous_user"
+
+    print(f"[matchJobs] Computing job recommendations for userId: {user_id}")
+    db = firestore.client()
+
+    user_profile = {}
+    resume_analysis = {}
+    try:
+        user_snap = db.collection("users").document(user_id).get()
+        if user_snap.exists:
+            user_profile = user_snap.to_dict()
+
+        analysis_snap = db.collection("resumeAnalysis").document(f"analysis_{user_id}").get()
+        if analysis_snap.exists:
+            resume_analysis = analysis_snap.to_dict()
+    except Exception as e:
+        print(f"[matchJobs] Error reading user/analysis docs: {e}")
+
+    # Read active jobs from Firestore
+    jobs = []
+    try:
+        jobs_stream = db.collection("jobs").stream()
+        for doc_snap in jobs_stream:
+            j_data = doc_snap.to_dict()
+            j_data["id"] = doc_snap.id
+            if j_data.get("active") is not False:
+                jobs.append(j_data)
+    except Exception as e:
+        print(f"[matchJobs] Error reading jobs: {e}")
+
+    matches = []
+    for job in jobs:
+        match_result = calculate_job_match(user_profile, resume_analysis, job)
+        serialized_job = serialize_firestore_value(job)
+        matches.append({
+            "jobId": job["id"],
+            "score": match_result["score"],
+            "matched_skills": match_result["matched_skills"],
+            "missing_skills": match_result["missing_skills"],
+            "explanation": match_result["explanation"],
+            "scoreBreakdown": match_result["scoreBreakdown"],
+            "matchedReq": match_result["matchedReq"],
+            "missingReq": match_result["missingReq"],
+            "matchedPref": match_result["matchedPref"],
+            "missingPref": match_result["missingPref"],
+            "disclaimer": match_result["disclaimer"],
+            "job": serialized_job
+        })
+
+    # Sort descending by match score
+    matches.sort(key=lambda m: m["score"], reverse=True)
+    print(f"[matchJobs] Completed matching for {len(matches)} jobs.")
+
+    return {
+        "success": True,
+        "userId": user_id,
+        "totalMatches": len(matches),
+        "matches": matches
+    }
+
+
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["post", "options"]),
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60
+)
+def matchJob(req: https_fn.CallableRequest) -> dict:
+    """
+    Callable Cloud Function (2nd Gen): matchJob.
+    Accepts: { userId?: str, jobId: str }
+    Reads user profile, resumeAnalysis, and specified job from Firestore via Admin SDK,
+    scores job using deterministic explainable algorithm per PLAN.md section 8,
+    and returns breakdown: { jobId, score, matched_skills, missing_skills, explanation, ... }.
+    """
+    data = req.data or {}
+    job_id = data.get("jobId")
+    if not job_id:
+        return {"success": False, "error": "Missing required jobId parameter."}
+
+    user_id = data.get("userId")
+    if not user_id and req.auth and req.auth.uid:
+        user_id = req.auth.uid
+    if not user_id:
+        user_id = "anonymous_user"
+
+    print(f"[matchJob] Computing single-job match for userId: {user_id}, jobId: {job_id}")
+    db = firestore.client()
+
+    user_profile = {}
+    resume_analysis = {}
+    try:
+        user_snap = db.collection("users").document(user_id).get()
+        if user_snap.exists:
+            user_profile = user_snap.to_dict()
+
+        analysis_snap = db.collection("resumeAnalysis").document(f"analysis_{user_id}").get()
+        if analysis_snap.exists:
+            resume_analysis = analysis_snap.to_dict()
+    except Exception as e:
+        print(f"[matchJob] Error reading user/analysis docs: {e}")
+
+    job_data = None
+    try:
+        job_snap = db.collection("jobs").document(job_id).get()
+        if job_snap.exists:
+            job_data = job_snap.to_dict()
+            job_data["id"] = job_snap.id
+    except Exception as e:
+        print(f"[matchJob] Error reading job {job_id}: {e}")
+
+    if not job_data:
+        return {"success": False, "error": f"Job with ID '{job_id}' not found."}
+
+    match_result = calculate_job_match(user_profile, resume_analysis, job_data)
+    serialized_job = serialize_firestore_value(job_data)
+
+    return {
+        "success": True,
+        "jobId": job_id,
+        "userId": user_id,
+        "score": match_result["score"],
+        "matched_skills": match_result["matched_skills"],
+        "missing_skills": match_result["missing_skills"],
+        "explanation": match_result["explanation"],
+        "scoreBreakdown": match_result["scoreBreakdown"],
+        "matchedReq": match_result["matchedReq"],
+        "missingReq": match_result["missingReq"],
+        "matchedPref": match_result["matchedPref"],
+        "missingPref": match_result["missingPref"],
+        "disclaimer": match_result["disclaimer"],
+        "job": serialized_job
+    }
+

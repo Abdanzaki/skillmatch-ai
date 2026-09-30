@@ -15,6 +15,7 @@ import ResumeUploadPage from './pages/ResumeUploadPage';
 import ResumeAnalysisPage from './pages/ResumeAnalysisPage';
 import JobsPage from './pages/JobsPage';
 import JobDetailsPage from './pages/JobDetailsPage';
+import RecommendedJobsPage from './pages/RecommendedJobsPage';
 import MyApplicationsPage from './pages/MyApplicationsPage';
 import SkillGapPage from './pages/SkillGapPage';
 import ProfilePage from './pages/ProfilePage';
@@ -34,6 +35,8 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/jobs/recommended" element={<RecommendedJobsPage />} />
+          <Route path="/recommended-jobs" element={<RecommendedJobsPage />} />
           <Route path="/jobs/:id" element={<JobDetailsPage />} />
 
           {/* Protected Candidate Routes */}

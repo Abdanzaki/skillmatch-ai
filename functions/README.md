@@ -45,6 +45,40 @@ This directory contains the Python Cloud Functions backend powering resume entit
   }
   ```
 
+### `matchJobs`
+- **Trigger**: HTTPS Callable (`on_call`)
+- **Input Payload**:
+  ```json
+  {
+    "userId": "USER_UID"
+  }
+  ```
+- **Operations**:
+  1. Reads candidate profile from `users/{userId}` and parsed resume from `resumeAnalysis/analysis_{userId}` via Firebase Admin SDK.
+  2. Reads all active jobs from `jobs` collection.
+  3. Evaluates deterministic explainable scoring per PLAN.md Section 8:
+     - Skill normalization with alias map (e.g. `springboot` &rarr; `Spring Boot`)
+     - Required skills overlap (60% weight)
+     - Preferred skills overlap (20% weight)
+     - Career experience tenure fit (10% weight)
+     - Education & STEM degree alignment (10% weight)
+     - TF-IDF cosine similarity refinement between resume text and job description
+  4. Formulates explicit matched skills and missing skills lists with non-guarantee disclaimer.
+  5. Returns matches sorted descending by `score`.
+
+### `matchJob`
+- **Trigger**: HTTPS Callable (`on_call`)
+- **Input Payload**:
+  ```json
+  {
+    "userId": "USER_UID",
+    "jobId": "JOB_ID"
+  }
+  ```
+- **Operations**:
+  1. Computes single-job compatibility breakdown for the specified position.
+  2. Returns `{ jobId, score, matched_skills, missing_skills, explanation, scoreBreakdown, matchedReq, missingReq, matchedPref, missingPref, disclaimer, job }`.
+
 ---
 
 ## Local Development & Emulators

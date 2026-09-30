@@ -103,6 +103,20 @@ export default function Navbar() {
                 Jobs
               </Link>
               <Link
+                to="/jobs/recommended"
+                style={{
+                  color: isActive('/jobs/recommended') ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <Sparkles size={16} />
+                Recommended
+              </Link>
+              <Link
                 to="/resume"
                 style={{
                   color: isActive('/resume') ? 'var(--accent-primary)' : 'var(--text-secondary)',
@@ -230,7 +244,8 @@ export default function Navbar() {
                 </div>
               </div>
               <Link to="/dashboard" onClick={() => setMobileMenuOpen(false)}>Dashboard</Link>
-              <Link to="/jobs" onClick={() => setMobileMenuOpen(false)}>Jobs</Link>
+              <Link to="/jobs" onClick={() => setMobileMenuOpen(false)}>All Jobs</Link>
+              <Link to="/jobs/recommended" onClick={() => setMobileMenuOpen(false)}>Recommended Jobs</Link>
               <Link to="/resume" onClick={() => setMobileMenuOpen(false)}>My Resume</Link>
               <Link to="/applications" onClick={() => setMobileMenuOpen(false)}>Applications</Link>
               <Link to="/skill-gap" onClick={() => setMobileMenuOpen(false)}>Skill Gap</Link>

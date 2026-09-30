@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   FileText,
   Briefcase,
+  Sparkles,
   Send,
   Compass,
   User,
@@ -102,7 +103,11 @@ export default function Sidebar() {
           </NavLink>
           <NavLink to="/jobs" className={navItemClass}>
             <Briefcase size={18} />
-            <span>Jobs & Matching</span>
+            <span>All Jobs</span>
+          </NavLink>
+          <NavLink to="/jobs/recommended" className={navItemClass}>
+            <Sparkles size={18} />
+            <span>Recommended Jobs</span>
           </NavLink>
           <NavLink to="/applications" className={navItemClass}>
             <Send size={18} />
