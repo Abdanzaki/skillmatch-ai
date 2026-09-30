@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { useAuth } from '../context/AuthContext';
-import { uploadResumeFile } from '../services/storageService';
-import { createResumeRecord } from '../services/firestoreService';
+import { extractTextFromDocument, validateResumeDocument } from '../services/pdfService';
 import { parseResume } from '../services/functionsService';
 import {
   UploadCloud,
@@ -13,16 +12,17 @@ import {
   Sparkles,
   ArrowRight,
   ShieldCheck,
-  Cpu
+  Cpu,
+  FileCheck
 } from 'lucide-react';
 
 export default function ResumeUploadPage() {
   const { currentUser } = useAuth();
   const [file, setFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadStep, setUploadStep] = useState(''); // 'validating' | 'uploading' | 'parsing' | 'complete'
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processing, setProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState(''); // 'extracting' | 'parsing' | 'complete'
+  const [extractionProgress, setExtractionProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const navigate = useNavigate();
@@ -37,29 +37,17 @@ export default function ResumeUploadPage() {
     }
   };
 
-  const validateAndSetFile = (selected) => {
+  const handleFileSelection = (selected) => {
     setErrorMessage('');
     if (!selected) return;
 
-    const ext = selected.name.split('.').pop()?.toLowerCase();
-    const validExts = ['pdf', 'doc', 'docx'];
-    const validTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ];
-
-    if (!validExts.includes(ext) && !validTypes.includes(selected.type)) {
-      setErrorMessage('Unsupported file format. Please upload a PDF, DOC, or DOCX document.');
-      return;
+    try {
+      validateResumeDocument(selected);
+      setFile(selected);
+    } catch (err) {
+      setErrorMessage(err.message);
+      setFile(null);
     }
-
-    if (selected.size > 10 * 1024 * 1024) {
-      setErrorMessage(`File is too large (${(selected.size / (1024 * 1024)).toFixed(2)} MB). Maximum allowed size is 10MB.`);
-      return;
-    }
-
-    setFile(selected);
   };
 
   const handleDrop = (e) => {
@@ -67,64 +55,57 @@ export default function ResumeUploadPage() {
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      validateAndSetFile(e.dataTransfer.files[0]);
+      handleFileSelection(e.dataTransfer.files[0]);
     }
   };
 
   const handleChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      validateAndSetFile(e.target.files[0]);
+      handleFileSelection(e.target.files[0]);
     }
   };
 
   const handleUploadAndAnalyze = async () => {
     if (!file || !currentUser) return;
-    setUploading(true);
+    setProcessing(true);
     setErrorMessage('');
 
     try {
-      // Step 1: Upload to Cloud Storage
-      setUploadStep('uploading');
-      setStatusMessage('Encrypting and uploading resume document to Cloud Storage...');
+      // Step 1: In-Browser PDF Text Extraction using pdfjs-dist
+      setProcessingStep('extracting');
+      setStatusMessage('Extracting text directly in your browser with PDF.js...');
 
-      const uploadResult = await uploadResumeFile(currentUser.uid, file, (progress) => {
-        setUploadProgress(progress);
+      const extractedText = await extractTextFromDocument(file, (progress) => {
+        setExtractionProgress(progress);
       });
 
-      // Step 2: Record metadata in Firestore resumes collection
-      setStatusMessage('Creating document metadata record...');
-      const resumeDoc = await createResumeRecord({
-        userId: currentUser.uid,
-        fileName: uploadResult.fileName,
-        storagePath: uploadResult.storagePath,
-        fileSizeBytes: uploadResult.fileSizeBytes,
-        mimeType: uploadResult.mimeType,
-        parsed: false
-      });
+      if (!extractedText || extractedText.trim().length < 50) {
+        throw new Error('Very little text was found in the PDF. Please ensure the document is not an image-only scan.');
+      }
 
-      // Step 3: Call parseResume Python Cloud Function
-      setUploadStep('parsing');
-      setStatusMessage('Invoking AI entity extraction (pypdf & technical skill vocabulary)...');
+      // Step 2: Send extracted text to Python Cloud Function for AI entity extraction
+      setProcessingStep('parsing');
+      setStatusMessage('Analyzing text, extracting technical competencies, and scoring profile...');
 
       await parseResume({
-        storagePath: uploadResult.storagePath,
-        resumeId: resumeDoc.id,
+        text: extractedText,
         userId: currentUser.uid,
-        fileName: uploadResult.fileName
+        fileName: file.name,
+        fileSizeBytes: file.size
       });
 
-      // Step 4: Completion & Navigation
-      setUploadStep('complete');
-      setStatusMessage('Resume uploaded and parsed successfully! Redirecting to breakdown...');
+      // Step 3: Complete & redirect to analysis page
+      setProcessingStep('complete');
+      setStatusMessage('Resume parsed and analyzed successfully! Redirecting to breakdown...');
 
       setTimeout(() => {
         navigate('/resume/analysis');
-      }, 1200);
+      }, 1000);
     } catch (err) {
-      console.error('Error during resume processing pipeline:', err);
-      setErrorMessage(err.message || 'Failed to process resume. Please verify your file and try again.');
+      console.error('Error during client-side resume extraction & analysis:', err);
+      setErrorMessage(err.message || 'Failed to process resume. Please ensure the file is a valid PDF and try again.');
     } finally {
-      setUploading(false);
+      setProcessing(false);
     }
   };
 
@@ -136,7 +117,7 @@ export default function ResumeUploadPage() {
           <div style={{ marginBottom: 28 }}>
             <h1 style={{ fontSize: '1.9rem', marginBottom: 6 }}>Resume Upload & Analysis</h1>
             <p style={{ color: 'var(--text-secondary)' }}>
-              Upload your latest resume (PDF, DOC, or DOCX) to trigger AI extraction of skills, education, experience, and precision job matches.
+              Upload your resume PDF (max 5MB). Text is extracted directly in your browser for speed, privacy, and precision AI matching.
             </p>
           </div>
 
@@ -154,7 +135,7 @@ export default function ResumeUploadPage() {
             </div>
           )}
 
-          {/* Drag & Drop Upload Zone */}
+          {/* Drag & Drop Zone */}
           <div
             className="glass-card"
             onDragEnter={handleDrag}
@@ -166,19 +147,19 @@ export default function ResumeUploadPage() {
               textAlign: 'center',
               border: dragActive ? '2px dashed var(--accent-primary)' : '2px dashed var(--border-default)',
               background: dragActive ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-glass-card)',
-              cursor: uploading ? 'default' : 'pointer',
+              cursor: processing ? 'default' : 'pointer',
               marginBottom: 28,
               transition: 'all 0.2s ease'
             }}
-            onClick={() => !uploading && document.getElementById('resume-file-input').click()}
+            onClick={() => !processing && document.getElementById('resume-file-input').click()}
           >
             <input
               id="resume-file-input"
               type="file"
-              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".pdf,.txt,application/pdf,text/plain"
               style={{ display: 'none' }}
               onChange={handleChange}
-              disabled={uploading}
+              disabled={processing}
             />
 
             <div style={{
@@ -192,8 +173,10 @@ export default function ResumeUploadPage() {
               justifyContent: 'center',
               margin: '0 auto 20px'
             }}>
-              {uploadStep === 'parsing' ? (
+              {processingStep === 'parsing' ? (
                 <Cpu size={36} className="spinner" style={{ border: 'none', animation: 'spin 2s linear infinite' }} />
+              ) : processingStep === 'extracting' ? (
+                <FileCheck size={36} color="#38bdf8" />
               ) : (
                 <UploadCloud size={36} />
               )}
@@ -206,20 +189,20 @@ export default function ResumeUploadPage() {
                   <span>{file.name}</span>
                 </div>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  {(file.size / (1024 * 1024)).toFixed(2)} MB • Ready for AI extraction
+                  {(file.size / (1024 * 1024)).toFixed(2)} MB • Ready for in-browser extraction
                 </p>
 
-                {uploading && (
+                {processing && (
                   <div style={{ maxWidth: 360, margin: '20px auto 0' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
-                      <span>{uploadStep === 'uploading' ? 'Uploading to Storage' : 'AI Analysis in Progress'}</span>
-                      <span>{uploadStep === 'uploading' ? `${uploadProgress}%` : 'Processing...'}</span>
+                      <span>{processingStep === 'extracting' ? 'Extracting Text (PDF.js)' : 'AI Skill Analysis'}</span>
+                      <span>{processingStep === 'extracting' ? `${extractionProgress}%` : 'Processing...'}</span>
                     </div>
                     <div className="progress-container">
                       <div
                         className="progress-bar"
                         style={{
-                          width: uploadStep === 'parsing' || uploadStep === 'complete' ? '100%' : `${uploadProgress}%`
+                          width: processingStep === 'parsing' || processingStep === 'complete' ? '100%' : `${extractionProgress}%`
                         }}
                       />
                     </div>
@@ -228,16 +211,16 @@ export default function ResumeUploadPage() {
               </div>
             ) : (
               <div>
-                <h3 style={{ fontSize: '1.25rem', marginBottom: 8 }}>Drag and drop your resume PDF or Word document</h3>
+                <h3 style={{ fontSize: '1.25rem', marginBottom: 8 }}>Drag and drop your resume PDF here</h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 16 }}>
-                  Supported formats: PDF, DOC, DOCX (Max file size: 10MB)
+                  Supported formats: PDF (.pdf) or Text (.txt) — Maximum size 5MB
                 </p>
-                <span className="btn btn-outline btn-sm">Select Document File</span>
+                <span className="btn btn-outline btn-sm">Select PDF Document</span>
               </div>
             )}
           </div>
 
-          {file && !uploading && (
+          {file && !processing && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
               <button
                 type="button"
@@ -253,12 +236,12 @@ export default function ResumeUploadPage() {
                 style={{ minWidth: 200 }}
               >
                 <Sparkles size={18} />
-                Upload & Analyze with AI
+                Extract Text & Analyze
               </button>
             </div>
           )}
 
-          {/* Privacy & Storage Isolation Notice */}
+          {/* Privacy & Storage-Free Architecture Notice */}
           <div style={{
             marginTop: 40,
             padding: '22px',
@@ -273,10 +256,9 @@ export default function ResumeUploadPage() {
               <ShieldCheck size={24} />
             </div>
             <div>
-              <h4 style={{ fontSize: '0.95rem', marginBottom: 6 }}>Strict Data Privacy & Storage Isolation</h4>
+              <h4 style={{ fontSize: '0.95rem', marginBottom: 6 }}>Storage-Free & Client-Side Privacy</h4>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                Your resume document is stored in isolated Cloud Storage under your unique authentication identity.
-                Storage paths and raw bucket URIs are never exposed in user responses. Extracted structured data is editable and can be updated at any time.
+                Your resume PDF is parsed directly in your web browser using <code>pdfjs-dist</code>. No raw binary files are stored in public or unencrypted storage buckets. Extracted text is analyzed to build your structured candidate profile in Cloud Firestore, and you can edit or remove it at any time.
               </p>
             </div>
           </div>

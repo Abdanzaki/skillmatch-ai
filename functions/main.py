@@ -1,14 +1,15 @@
 """
 SkillMatch AI — Cloud Functions 2nd Gen (Python)
-Implements parseResume callable Cloud Function per PLAN.md Section 6 & Section 9.
+Implements parseResume callable Cloud Function per PLAN.md Section 6.
+Storage-Free Design: Accepts extracted text directly from client-side PDF parser (pdfjs-dist),
+extracts entities & skills via curated vocabulary and regex, persists to Firestore resumeAnalysis,
+and returns structured JSON.
 """
 
-import os
-import io
 import re
 from datetime import datetime, timezone
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from firebase_admin import firestore
 from firebase_functions import https_fn, options
 
 # Initialize Firebase Admin singleton
@@ -80,44 +81,23 @@ TECH_VOCABULARY = {
 }
 
 
-def extract_text_from_pdf_bytes(pdf_bytes: bytes) -> str:
-    """Extracts raw text content across all pages of a PDF."""
-    try:
-        from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        extracted_pages = []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                extracted_pages.append(text)
-        return "\n".join(extracted_pages)
-    except Exception as exc:
-        print(f"[parseResume] PDF extraction fallback: {exc}")
-        # Return fallback decodable string if possible
-        return pdf_bytes.decode("utf-8", errors="ignore")
-
-
 def parse_entities_from_text(raw_text: str) -> dict:
     """Parses personal information, skills, experience, education, and projects from resume text."""
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
 
     # 1. Contact / Personal Info Extraction
-    # Email
     email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", raw_text)
     email = email_match.group(0) if email_match else ""
 
-    # Phone
     phone_match = re.search(r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", raw_text)
     phone = phone_match.group(0) if phone_match else ""
 
-    # LinkedIn / GitHub
     linkedin_match = re.search(r"(?:linkedin\.com/in/|linkedin\.com/)([a-zA-Z0-9_-]+)", raw_text, re.IGNORECASE)
     linkedin = f"linkedin.com/in/{linkedin_match.group(1)}" if linkedin_match else ""
 
     github_match = re.search(r"(?:github\.com/)([a-zA-Z0-9_-]+)", raw_text, re.IGNORECASE)
     github = f"github.com/{github_match.group(1)}" if github_match else ""
 
-    # Name: Typically the first substantial heading line
     candidate_name = ""
     for line in lines[:5]:
         if not re.search(r"[@|http|www|phone|resume|curriculum]", line, re.IGNORECASE) and len(line) < 40:
@@ -128,7 +108,6 @@ def parse_entities_from_text(raw_text: str) -> dict:
     if not candidate_name:
         candidate_name = "Candidate"
 
-    # Location heuristic (e.g. City, ST or City, Country)
     location_match = re.search(r"([A-Z][a-zA-Z\s]+,\s*[A-Z]{2}(?:\s+\d{5})?)", raw_text)
     location = location_match.group(1) if location_match else "United States"
 
@@ -169,7 +148,6 @@ def parse_entities_from_text(raw_text: str) -> dict:
             "gpa": "3.8"
         })
 
-    # Search university names in text
     univ_match = re.search(r"([A-Z][a-zA-Z\s]*(?:University|College|Institute of Technology)[a-zA-Z\s]*)", raw_text)
     if univ_match and education_entries:
         education_entries[0]["institution"] = univ_match.group(1).strip()
@@ -183,7 +161,6 @@ def parse_entities_from_text(raw_text: str) -> dict:
 
     # 4. Experience Extraction
     experience_entries = []
-    # Search for date ranges like 2021 - 2023 or June 2022 - Present
     date_matches = list(re.finditer(
         r"(?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?(20\d\d)\s*(?:-|–|to)\s*(?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+)?(20\d\d|Present|Current)",
         raw_text,
@@ -197,7 +174,6 @@ def parse_entities_from_text(raw_text: str) -> dict:
         end_year = datetime.now().year if "present" in end_val.lower() or "current" in end_val.lower() else int(end_val)
         est_years = max(1, end_year - start_year)
 
-    # Heuristic experience items
     exp_titles = ["Software Engineer", "Developer", "Backend Engineer", "Full Stack Developer", "Engineering Intern"]
     for title in exp_titles:
         if re.search(r"\b" + re.escape(title) + r"\b", raw_text, re.IGNORECASE):
@@ -259,7 +235,6 @@ def parse_entities_from_text(raw_text: str) -> dict:
     education_score = 95 if education_entries else 70
     projects_score = min(100, max(60, len(projects_entries) * 30 + 30))
 
-    # Completeness check
     completeness_items = [
         bool(personal_info.get("email")),
         bool(personal_info.get("phone")),
@@ -271,7 +246,6 @@ def parse_entities_from_text(raw_text: str) -> dict:
     ]
     completeness_score = int((sum(completeness_items) / len(completeness_items)) * 100)
 
-    # Weighted overall score
     overall_score = round(
         (skills_score * 0.35) +
         (experience_score * 0.25) +
@@ -313,14 +287,15 @@ def parse_entities_from_text(raw_text: str) -> dict:
 )
 def parseResume(req: https_fn.CallableRequest) -> dict:
     """
-    Callable Cloud Function (2nd Gen): parseResume.
-    Accepts: { storagePath: str, resumeId?: str, userId?: str }
-    Downloads resume from Cloud Storage, extracts structured data, saves to resumeAnalysis in Firestore,
-    and returns structured JSON per PLAN.md section 6.
+    Callable Cloud Function (2nd Gen): parseResume (Storage-Free Architecture).
+    Accepts: { text: str, userId?: str, fileName?: str, fileSizeBytes?: int, resumeId?: str }
+    Parses resume text extracted client-side (via pdfjs-dist),
+    saves structured entities to resumeAnalysis in Firestore, and returns structured JSON per PLAN.md section 6.
     """
     data = req.data or {}
-    storage_path = data.get("storagePath")
-    resume_id = data.get("resumeId", f"resume_{int(datetime.now().timestamp())}")
+    raw_text = data.get("text", "")
+    file_name = data.get("fileName", "Resume.pdf")
+    file_size_bytes = data.get("fileSizeBytes", len(raw_text.encode("utf-8")))
 
     # Derive userId from auth context or request data
     user_id = None
@@ -331,24 +306,11 @@ def parseResume(req: https_fn.CallableRequest) -> dict:
     else:
         user_id = "anonymous_user"
 
-    print(f"[parseResume] Initiating parse for user: {user_id}, path: {storage_path}")
+    resume_id = data.get("resumeId") or f"resume_{user_id}"
 
-    # Fallback placeholder text if storagePath is not provided or fails to download
-    raw_text = ""
-    if storage_path:
-        try:
-            bucket = storage.bucket()
-            blob = bucket.blob(storage_path)
-            if blob.exists():
-                pdf_bytes = blob.download_as_bytes()
-                raw_text = extract_text_from_pdf_bytes(pdf_bytes)
-                print(f"[parseResume] Downloaded and extracted {len(raw_text)} chars from Cloud Storage")
-            else:
-                print(f"[parseResume] Warning: Storage path '{storage_path}' not found in bucket. Using fallback template.")
-        except Exception as err:
-            print(f"[parseResume] Cloud Storage download error: {err}")
+    print(f"[parseResume] Initiating text parsing for user: {user_id}, text length: {len(raw_text)} chars")
 
-    # If no text was extracted (e.g. storage bucket not yet initialized or dev mode), provide a realistic baseline
+    # If raw_text is empty, provide a realistic baseline template
     if not raw_text.strip():
         raw_text = f"""
         Alex Morgan
@@ -407,15 +369,21 @@ def parseResume(req: https_fn.CallableRequest) -> dict:
     }
 
     try:
+        # Save resumeAnalysis document
         db.collection("resumeAnalysis").document(analysis_id).set(analysis_doc, merge=True)
         print(f"[parseResume] Saved analysis doc to resumeAnalysis/{analysis_id}")
 
-        # Update resume record if resumeId provided
-        if resume_id:
-            db.collection("resumes").document(resume_id).set({
-                "parsed": True,
-                "parsedAt": datetime.now(timezone.utc)
-            }, merge=True)
+        # Update or create resume metadata record in Firestore (without any Cloud Storage paths)
+        db.collection("resumes").document(resume_id).set({
+            "id": resume_id,
+            "userId": user_id,
+            "fileName": file_name,
+            "fileSizeBytes": file_size_bytes,
+            "mimeType": "application/pdf",
+            "uploadedAt": datetime.now(timezone.utc),
+            "parsed": True,
+            "active": True
+        }, merge=True)
     except Exception as db_err:
         print(f"[parseResume] Firestore write notice (will still return result): {db_err}")
 

@@ -21,9 +21,10 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
-          'firebase-core': ['firebase/app', 'firebase/auth', 'firebase/functions', 'firebase/storage'],
+          'firebase-core': ['firebase/app', 'firebase/auth', 'firebase/functions'],
           'firebase-firestore': ['firebase/firestore'],
-          icons: ['lucide-react']
+          icons: ['lucide-react'],
+          pdfjs: ['pdfjs-dist']
         }
       }
     }

@@ -10,7 +10,7 @@
 SkillMatch AI bridges the gap between candidate resumes and job postings through transparent, explainable machine intelligence:
 
 1. **Sign Up & Profile Setup**: Register securely via Email/Password or Google Sign-In.
-2. **Resume PDF Upload**: Drag-and-drop resume PDFs into sandboxed Firebase Cloud Storage (validated by file type and size).
+2. **Resume PDF Parsing (Storage-Free)**: Drag-and-drop resume PDFs in browser; text is extracted entirely client-side using `pdfjs-dist` (validated for file type and size <= 5MB) without needing any Cloud Storage bucket.
 3. **AI Parsing & Extraction**: Python Cloud Function extracts structured personal info, education, skills, experience, and projects into editable JSON.
 4. **Deterministic Transparent Matching**: Algorithmic scoring based on verified tech overlap (60% required skills, 20% preferred skills, 10% experience, 10% education) with clear matched vs missing skill indicators.
 5. **Skill Gap Discovery**: Identify missing technologies and explore curated learning pathways.
@@ -24,7 +24,7 @@ SkillMatch AI bridges the gap between candidate resumes and job postings through
 React (Vercel)
   ├── Firebase Auth (Email/Password, Google Sign-In, Custom Claims)
   ├── Cloud Firestore (Candidate profiles, standard skills taxonomy, jobs, applications)
-  ├── Cloud Storage (Secure PDF resume storage with UID isolation)
+  ├── Storage-Free In-Browser PDF Parser (pdfjs-dist, no Cloud Storage bucket required)
   └── Python Cloud Functions (2nd Gen):
        ├── parseResume  — extracts structured entities from resume text
        └── matchJobs    — scores profiles vs active jobs with TF-IDF similarity
@@ -37,15 +37,17 @@ React (Vercel)
 ```
 skillmatch-ai/
 ├── frontend/                 # React 18 SPA (Vite + React Router 6 + Custom Modern CSS)
+├── functions/                # Python Cloud Functions (2nd Gen callable parseResume)
 ├── seed/                     # Firebase Admin SDK seeder script
 ├── docs/
 │   └── DATA_MODEL.md         # Firestore collection schemas & indexing specifications
-├── firebase.json             # Firebase configuration (Firestore, Storage, Functions, Emulators)
+├── firebase.json             # Firebase configuration (Firestore, Functions, Emulators; Storage-Free)
 ├── firestore.rules           # Cloud Firestore security rules with UID & admin claim checks
 ├── firestore.indexes.json    # Composite indexes for querying jobs and applications
-├── storage.rules             # Cloud Storage security rules (PDF/Word validation, 10MB limit)
+├── storage.rules             # Cloud Storage security rules (retained for reference, undeployed)
 ├── vercel.json               # SPA routing rewrite rules for Vercel deployment
 ├── PLAN.md                   # Full master architecture and engineering plan
+├── FIREBASE_SETUP.md         # Provisioned Firebase project details (skillmatch-ai-abdan)
 ├── .env.example              # Environment variables template
 └── README.md                 # Project documentation
 ```
@@ -54,10 +56,10 @@ skillmatch-ai/
 
 ## 4. Firestore Data Model
 
-The database is structured across 12 collections defined in [`docs/DATA_MODEL.md`](file:///home/hatch/workspace/skillmatch-ai/docs/DATA_MODEL.md):
+The database is structured across 12 collections defined in [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md):
 
 - `users`: Candidate profiles and admin accounts
-- `resumes`: Resume file metadata and storage references
+- `resumes`: Resume metadata records (Storage-Free, references extracted client-side)
 - `skills`: Standard taxonomy of skills and search aliases
 - `userSkills`: Skills associated with a specific candidate
 - `education`: Educational history
@@ -132,9 +134,25 @@ Visit `http://localhost:3000` to interact with the application.
 
 ## 8. Build & Verification
 
-To verify that the frontend compiles cleanly:
+### Frontend Build
+To verify that the frontend compiles cleanly and creates optimized Vite production chunks:
 
 ```bash
 cd frontend
 npm run build
+```
+
+### Cloud Functions Syntax & Bytecode Compilation
+To verify Python Cloud Functions syntax and typing integrity:
+
+```bash
+python3 -m py_compile functions/main.py
+```
+
+### Seeder Dry Run
+To validate data models and job generation without modifying Firestore:
+
+```bash
+cd seed
+npm run seed:dry-run
 ```

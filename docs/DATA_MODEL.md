@@ -9,7 +9,7 @@ This document outlines the Cloud Firestore collection schema, field definitions,
 | Collection Name | Purpose | Access Control |
 |-----------------|---------|----------------|
 | `users` | User profile & authentication data | Owner read/update, Admin full |
-| `resumes` | Resume PDF metadata & Cloud Storage reference | Owner read/write, Admin read |
+| `resumes` | Resume document metadata (Storage-Free in-browser extraction) | Owner read/write, Admin read |
 | `skills` | Standard taxonomy of skills and aliases | Public read, Admin write |
 | `userSkills` | Skills associated with a specific user | Owner read/write, Admin read |
 | `education` | Educational history of a user | Owner read/write, Admin read |
@@ -52,7 +52,6 @@ interface Resume {
   id: string;
   userId: string;
   fileName: string;
-  storagePath: string; // resumes/{userId}/{filename}
   fileSizeBytes: number;
   mimeType: string; // 'application/pdf'
   uploadedAt: FirebaseFirestore.Timestamp;

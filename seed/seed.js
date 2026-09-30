@@ -849,13 +849,12 @@ async function main() {
   }, { merge: true });
   console.log(`✓ Seeded project entry for demo user`);
 
-  // Demo Resume doc
+  // Demo Resume doc (Storage-Free Metadata)
   const resumeId = `resume_${demoUid}_001`;
   await db.collection('resumes').doc(resumeId).set({
     id: resumeId,
     userId: demoUid,
     fileName: 'Alex_Morgan_Software_Engineer_Resume.pdf',
-    storagePath: `resumes/${demoUid}/Alex_Morgan_Software_Engineer_Resume.pdf`,
     fileSizeBytes: 245120,
     mimeType: 'application/pdf',
     uploadedAt: now,
