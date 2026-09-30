@@ -11,7 +11,8 @@ import {
   where,
   orderBy,
   limit,
-  serverTimestamp
+  serverTimestamp,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
@@ -139,6 +140,20 @@ export async function saveUserSkill(data) {
 }
 
 // -------------------------------------------------------------
+// SKILLS TAXONOMY
+// -------------------------------------------------------------
+
+export async function getSkillsTaxonomy() {
+  try {
+    const snap = await getDocs(collection(db, 'skills'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn('[firestoreService] Failed to load skills taxonomy:', err);
+    return [];
+  }
+}
+
+// -------------------------------------------------------------
 // JOBS
 // -------------------------------------------------------------
 
@@ -161,20 +176,58 @@ export async function getJobById(jobId) {
 export async function createJob(jobData) {
   const newId = jobData.id || `job-${Date.now()}`;
   const jobRef = doc(db, 'jobs', newId);
+
+  // Format deadline if passed as a string or Date
+  let deadlineVal = null;
+  if (jobData.deadline) {
+    if (jobData.deadline instanceof Date) {
+      deadlineVal = Timestamp.fromDate(jobData.deadline);
+    } else if (typeof jobData.deadline === 'string' && jobData.deadline.trim()) {
+      deadlineVal = Timestamp.fromDate(new Date(jobData.deadline));
+    } else {
+      deadlineVal = jobData.deadline;
+    }
+  }
+
   const payload = {
     id: newId,
-    ...jobData,
+    title: jobData.title || '',
+    company: jobData.company || '',
+    location: jobData.location || '',
+    workMode: jobData.workMode || 'REMOTE',
+    salaryMin: Number(jobData.salaryMin) || 0,
+    salaryMax: Number(jobData.salaryMax) || 0,
+    experienceRequired: Number(jobData.experienceRequired) || 0,
+    description: jobData.description || '',
+    requiredSkills: Array.isArray(jobData.requiredSkills) ? jobData.requiredSkills : [],
+    preferredSkills: Array.isArray(jobData.preferredSkills) ? jobData.preferredSkills : [],
+    responsibilities: Array.isArray(jobData.responsibilities) ? jobData.responsibilities : [],
+    requirements: Array.isArray(jobData.requirements) ? jobData.requirements : [],
+    active: jobData.active !== false,
     postedAt: serverTimestamp(),
+    deadline: deadlineVal,
+    createdBy: jobData.createdBy || '',
     applicantCount: 0
   };
+
   await setDoc(jobRef, payload);
   return payload;
 }
 
 export async function updateJob(jobId, data) {
   const jobRef = doc(db, 'jobs', jobId);
+  const updatePayload = { ...data };
+
+  if (updatePayload.deadline && typeof updatePayload.deadline === 'string' && updatePayload.deadline.trim()) {
+    updatePayload.deadline = Timestamp.fromDate(new Date(updatePayload.deadline));
+  }
+
+  if (updatePayload.salaryMin !== undefined) updatePayload.salaryMin = Number(updatePayload.salaryMin);
+  if (updatePayload.salaryMax !== undefined) updatePayload.salaryMax = Number(updatePayload.salaryMax);
+  if (updatePayload.experienceRequired !== undefined) updatePayload.experienceRequired = Number(updatePayload.experienceRequired);
+
   await updateDoc(jobRef, {
-    ...data,
+    ...updatePayload,
     updatedAt: serverTimestamp()
   });
 }
